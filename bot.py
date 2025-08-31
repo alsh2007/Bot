@@ -1,140 +1,72 @@
 import os
-import sys
-import subprocess
-token = "7036178118:AAGCGkRbYdCclSaTVGzPJpUI3s_yuhSQpbc"
-
-# ===============================
-# تنزيل المكتبات إذا ما منصبة
-# ===============================
-def install(package):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-try:
-    import telegram
-except ImportError:
-    install("python-telegram-bot==20.3")
-
-try:
-    import yt_dlp
-except ImportError:
-    install("yt-dlp")
-
-# استيراد بعد التنصيب
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import yt_dlp
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-import logging
+# التوكن من Secrets
+TOKEN = os.environ['TOKEN']
 
-# ===============================
-# إعداد اللغات
-# ===============================
-LANGUAGES = {
-    "en": {
-        "welcome": "👋 Welcome to the bot! Please send /language to select your preferred language.",
-        "choose_language": "🌐 Choose your language:",
-        "idea": "This bot allows you to send a YouTube playlist link, and it will return the songs or videos as separate audio files.",
-        "send_playlist": "📩 Now send me a YouTube playlist link."
-    },
-    "ar": {
-        "welcome": "👋 أهلاً بيك بالبـوت! أرسل /language لاختيار لغتك.",
-        "choose_language": "🌐 اختَر لغتك:",
-        "idea": "هذا البوت يخليك ترسل رابط Playlist من يوتيوب ويرجعلك الفيديوهات أو الأغاني كملفات صوتية منفصلة.",
-        "send_playlist": "📩 هسه دزلي رابط Playlist من يوتيوب."
-    },
-    "fa": {
-        "welcome": "👋 به ربات خوش آمدید! لطفاً /language را بفرستید تا زبان خود را انتخاب کنید.",
-        "choose_language": "🌐 زبان خود را انتخاب کنید:",
-        "idea": "این ربات به شما اجازه می‌دهد لینک یک پلی‌لیست یوتیوب را ارسال کنید و آهنگ‌ها یا ویدیوها را به صورت فایل صوتی جداگانه دریافت کنید.",
-        "send_playlist": "📩 حالا لینک پلی‌لیست یوتیوب را بفرستید."
-    },
-    "ru": {
-        "welcome": "👋 Добро пожаловать в бота! Отправьте /language, чтобы выбрать язык.",
-        "choose_language": "🌐 Выберите ваш язык:",
-        "idea": "Этот бот позволяет отправить ссылку на YouTube плейлист, и он вернёт песни или видео как отдельные аудиофайлы.",
-        "send_playlist": "📩 Теперь отправьте ссылку на YouTube плейлист."
-    }
-}
-
-# خزن اللغة الافتراضية لكل يوزر
-user_languages = {}
-
-# ===============================
-# Handlers
-# ===============================
+# رسالة البداية
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_languages[update.effective_user.id] = "en"  # الافتراضي انكليزي
-    await update.message.reply_text(LANGUAGES["en"]["welcome"])
+    await update.message.reply_text(
+        "Welcome! 🌟\n\n"
+        "Send /language to select your language.\n"
+        "Or directly send me a YouTube playlist/video link 🎶"
+    )
 
-async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🇬🇧 English", callback_data="en")],
-        [InlineKeyboardButton("🇸🇦 العربية", callback_data="ar")],
-        [InlineKeyboardButton("🇮🇷 فارسی", callback_data="fa")],
-        [InlineKeyboardButton("🇷🇺 Русский", callback_data="ru")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    lang = user_languages.get(update.effective_user.id, "en")
-    await update.message.reply_text(LANGUAGES[lang]["choose_language"], reply_markup=reply_markup)
+# اختيار اللغة (بسيط للتجربة، نفس اللغات مثل قبل)
+async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Choose language:\nArabic | English | فارسی | Русский"
+    )
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_languages[query.from_user.id] = query.data
-    lang = LANGUAGES[query.data]
-    await query.edit_message_text(lang["idea"])
-    await query.message.reply_text(lang["send_playlist"])
-
-async def handle_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = user_languages.get(update.effective_user.id, "en")
-    url = update.message.text
-
-    await update.message.reply_text("⏳ Downloading playlist, please wait...")
-
-    # إعداد yt-dlp
+# دالة تنزيل ملف صوتي
+def download_audio(url, out_path="downloads"):
+    os.makedirs(out_path, exist_ok=True)
     ydl_opts = {
         "format": "bestaudio/best",
-        "outtmpl": "downloads/%(title)s.%(ext)s",
-        "noplaylist": False,
-        "quiet": True,
+        "outtmpl": f"{out_path}/%(title)s.%(ext)s",
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }],
+        "quiet": True
     }
 
-    os.makedirs("downloads", exist_ok=True)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        if "entries" in info:  # Playlist
+            return [os.path.join(out_path, f"{entry['title']}.mp3") for entry in info["entries"]]
+        else:  # Single video
+            return [os.path.join(out_path, f"{info['title']}.mp3")]
+
+# التعامل ويا الروابط
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text.strip()
+    if "youtube.com" not in url and "youtu.be" not in url:
+        await update.message.reply_text("⚠️ Please send a valid YouTube video or playlist link.")
+        return
+
+    await update.message.reply_text("⏳ Downloading... please wait")
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=True)
-
-            if "entries" in info_dict:
-                for entry in info_dict["entries"]:
-                    file_path = ydl.prepare_filename(entry)
-                    audio_file = file_path.replace(".webm", ".m4a")
-                    if os.path.exists(audio_file):
-                        await update.message.reply_audio(audio=open(audio_file, "rb"), title=entry.get("title"))
-                        os.remove(audio_file)
-            else:
-                file_path = ydl.prepare_filename(info_dict)
-                audio_file = file_path.replace(".webm", ".m4a")
-                if os.path.exists(audio_file):
-                    await update.message.reply_audio(audio=open(audio_file, "rb"), title=info_dict.get("title"))
-                    os.remove(audio_file)
-
+        files = download_audio(url)
+        for file_path in files:
+            with open(file_path, "rb") as f:
+                await update.message.reply_audio(
+                    audio=f,
+                    caption="✅ Download completed by Xas"
+                )
     except Exception as e:
-        await update.message.reply_text(f"⚠️ Error: {str(e)}")
+        await update.message.reply_text(f"❌ Error: {e}")
 
-# ===============================
-# Main
-# ===============================
+# تشغيل البوت
 def main():
-    TOKEN = os.getenv("TOKEN")  # من الـ Config Vars بـ Heroku
     app = Application.builder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("language", set_language))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_playlist))
-
-    print("✅ Bot is running...")
+    app.add_handler(CommandHandler("language", language))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
     app.run_polling()
 
 if __name__ == "__main__":
