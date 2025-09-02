@@ -1,25 +1,24 @@
 import os
 import yt_dlp
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
-from telegram import ChatAction
-import math
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-def start(update, context):
-    update.message.reply_text("هلا بيك! دزلي رابط يوتيوب وأنزلك الصوت فقط 🎵")
+# /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("هلا 🙌 دزلي رابط يوتيوب وأنزلك الصوت 🎶")
 
-def download_audio(update, context):
+# تحميل الصوت
+async def download_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
-    chat_id = update.message.chat_id
-
-    # يبين للمستخدم أنه دايشتغل
-    context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_AUDIO)
+    await update.message.reply_text("⏳ دا ينزل الصوت...")
 
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": "%(id)s.%(ext)s",
         "noplaylist": True,
+        "quiet": True,
     }
 
     try:
@@ -27,43 +26,21 @@ def download_audio(update, context):
             info = ydl.extract_info(url, download=True)
             file_name = f"{info['id']}.{info['ext']}"
 
-            duration = info.get("duration", 0)
-            duration_str = time_format(duration)
-
-            caption = f"download completed by XAS ({duration_str})"
-
             with open(file_name, "rb") as audio:
-                context.bot.send_audio(
-                    chat_id=chat_id,
-                    audio=audio,
-                    title=info.get("title", "Audio"),
-                    performer=info.get("uploader", "Unknown"),
-                    caption=caption,
-                )
+                await update.message.reply_audio(audio=audio, title=info.get("title", "Audio"))
 
             os.remove(file_name)
 
     except Exception as e:
-        update.message.reply_text(f"⚠️ Error: {str(e)}")
-
-def time_format(seconds):
-    h = seconds // 3600
-    m = (seconds % 3600) // 60
-    s = seconds % 60
-    if h > 0:
-        return f"{h:02}:{m:02}:{s:02}"
-    else:
-        return f"{m:02}:{s:02}"
+        await update.message.reply_text(f"⚠️ Error: {str(e)}")
 
 def main():
-    updater = Updater(BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, download_audio))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_audio))
 
-    updater.start_polling()
-    updater.idle()
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
