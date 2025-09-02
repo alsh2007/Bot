@@ -1,3 +1,2 @@
-pyrogram==2.0.0
-tgcrypto
-yt-dlp
+pyTelegramBotAPI==4.13.0
+yt-dlp==2025.8.1
