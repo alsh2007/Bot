@@ -1,86 +1,92 @@
 import os
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from yt_dlp import YoutubeDL
+import telebot
+from telebot import types
+import yt_dlp
+import tempfile
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-COOKIES = os.getenv("COOKIES")  # كل الكوكيز اللي رتبتها هنا
+# جلب المتغيرات من البيئة
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+COOKIES = os.environ.get('COOKIES')
 
-app = Client("yt_bot", bot_token=BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# صيغة التحميل
-FORMATS = ["video", "audio"]
-
-# يجيب جودات الفيديو المتاحة
-def get_video_formats(url):
+# دالة تحميل الفيديو/الصوت
+def download_media(url, media_type, quality=None):
     ydl_opts = {
-        "cookiefile": None,
-        "cookies": COOKIES,
-        "quiet": True,
+        'cookiefile': None,
+        'cookiesfrombrowser': False,
+        'quiet': True,
+        'outtmpl': tempfile.gettempdir() + '/%(title)s.%(ext)s'
     }
-    with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        formats = info.get("formats", [])
-        video_quals = []
-        for f in formats:
-            if f.get("vcodec") != "none" and f.get("acodec") != "none":
-                # فقط جودات متوفرة
-                if f["format_note"] not in video_quals:
-                    video_quals.append(f["format_note"])
-        return sorted(video_quals, key=lambda x: int(x.replace("p","")))
 
-# تحميل الفيديو أو الصوت حسب الجودة
-def download_media(url, ftype, quality=None):
-    ydl_opts = {
-        "cookiefile": None,
-        "cookies": COOKIES,
-        "outtmpl": "%(title)s.%(ext)s",
-    }
-    if ftype == "audio":
-        ydl_opts["format"] = "bestaudio/best"
-    elif ftype == "video" and quality:
-        ydl_opts["format"] = f"bestvideo[height={quality.replace('p','')}]+bestaudio/best"
-    with YoutubeDL(ydl_opts) as ydl:
+    # إذا حاطين الكوكيز
+    if COOKIES:
+        cookies_path = os.path.join(tempfile.gettempdir(), 'cookies.txt')
+        with open(cookies_path, 'w', encoding='utf-8') as f:
+            f.write(COOKIES)
+        ydl_opts['cookiefile'] = cookies_path
+
+    # إعدادات الصوت
+    if media_type == 'audio':
+        ydl_opts.update({
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        })
+    elif media_type == 'video' and quality:
+        ydl_opts['format'] = f'bestvideo[height<={quality}]+bestaudio/best'
+    else:
+        ydl_opts['format'] = 'best'
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-    return info["title"] + "." + info["ext"]
+        filename = ydl.prepare_filename(info)
+        if media_type == 'audio':
+            filename = os.path.splitext(filename)[0] + '.mp3'
+    return filename
+
+# زر البداية
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.send_message(message.chat.id, "ارسل لي رابط اليوتيوب الي تريد تحميله:")
 
 # استقبال الرابط
-@app.on_message(filters.command("download"))
-async def download_command(client, message):
-    try:
-        url = message.text.split(" ",1)[1]
-    except IndexError:
-        await message.reply_text("ادخل رابط بعد الامر /download")
-        return
-    
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton(f, callback_data=f"{url}|{f}")] for f in FORMATS]
-    )
-    await message.reply_text("اختر الصيغة:", reply_markup=keyboard)
+@bot.message_handler(func=lambda m: True)
+def get_link(message):
+    url = message.text
+    markup = types.InlineKeyboardMarkup()
+    btn_video = types.InlineKeyboardButton("Video", callback_data=f"video|{url}")
+    btn_audio = types.InlineKeyboardButton("Audio", callback_data=f"audio|{url}")
+    markup.add(btn_video, btn_audio)
+    bot.send_message(message.chat.id, "اختر نوع الملف:", reply_markup=markup)
 
-# التعامل مع الضغط على الأزرار
-@app.on_callback_query()
-async def button(client, callback_query):
-    data = callback_query.data
-    if "|" in data:
-        url, ftype = data.split("|")
-        if ftype == "video":
-            # نجيب جودات الفيديو
-            quals = get_video_formats(url)
-            keyboard = InlineKeyboardMarkup(
-                [[InlineKeyboardButton(q, callback_data=f"{url}|video|{q}")] for q in quals]
-            )
-            await callback_query.message.edit_text("اختر الجودة:", reply_markup=keyboard)
-        elif ftype == "audio":
-            await callback_query.message.edit_text("جاري تحميل الصوت...")
-            filename = download_media(url, "audio")
-            await callback_query.message.reply_document(filename)
-            await callback_query.message.edit_text("تم التحميل!")
-    elif data.count("|")==2:
-        url, ftype, quality = data.split("|")
-        await callback_query.message.edit_text(f"جاري تحميل الفيديو بجودة {quality}...")
-        filename = download_media(url, "video", quality)
-        await callback_query.message.reply_document(filename)
-        await callback_query.message.edit_text("تم التحميل!")
+# التعامل مع الأزرار
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    data = call.data
+    if data.startswith("audio"):
+        url = data.split("|")[1]
+        bot.answer_callback_query(call.id, "جاري تحميل الصوت...")
+        filename = download_media(url, 'audio')
+        with open(filename, 'rb') as f:
+            bot.send_audio(call.message.chat.id, f)
+    elif data.startswith("video"):
+        url = data.split("|")[1]
+        # أزرار الجودة
+        markup = types.InlineKeyboardMarkup()
+        for q in [144, 240, 360, 480, 720]:
+            btn = types.InlineKeyboardButton(f"{q}p", callback_data=f"video_quality|{url}|{q}")
+            markup.add(btn)
+        bot.send_message(call.message.chat.id, "اختر جودة الفيديو:", reply_markup=markup)
+    elif data.startswith("video_quality"):
+        _, url, quality = data.split("|")
+        quality = int(quality)
+        bot.answer_callback_query(call.id, f"جاري تحميل الفيديو {quality}p...")
+        filename = download_media(url, 'video', quality)
+        with open(filename, 'rb') as f:
+            bot.send_video(call.message.chat.id, f)
 
-app.run()
+bot.infinity_polling()
