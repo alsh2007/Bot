@@ -1,4 +1,5 @@
 import os
+os.system("pip install requests")
 import yt_dlp
 import tempfile
 import requests
