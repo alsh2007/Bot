@@ -1,83 +1,109 @@
 import os
-os.system("pip install requests")
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-import yt_dlp
-import requests
-from io import BytesIO
+import asyncio
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from yt_dlp import YoutubeDL
+from datetime import timedelta
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
-)
+# ===== متغيرات البوت =====
+TOKEN = os.environ.get("BOT_TOKEN")  # حط الـ Bot Token مالك بالRailway
+bot = Bot(token=TOKEN)
+dp = Dispatcher(bot)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# ===== إعدادات yt-dlp =====
+ydl_opts_video = {
+    'format': 'bestvideo+bestaudio/best',
+    'outtmpl': 'downloads/%(title)s.%(ext)s',
+    'noplaylist': True,
+    'quiet': True
+}
 
-# قائمة الدقات المتاحة
-RESOLUTIONS = ["144p", "240p", "360p", "480p", "720p", "1080p"]
+ydl_opts_audio = {
+    'format': 'bestaudio/best',
+    'outtmpl': 'downloads/%(title)s.%(ext)s',
+    'noplaylist': True,
+    'quiet': True
+}
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("هلو! دزلي رابط الفيديو من يوتيوب أو تيك توك أو انستغرام، وأنا أرسللك الملف.")
+# ===== أزرار الدقة =====
+QUALITY_BUTTONS = [
+    InlineKeyboardButton("144p", callback_data="144"),
+    InlineKeyboardButton("240p", callback_data="240"),
+    InlineKeyboardButton("360p", callback_data="360"),
+    InlineKeyboardButton("480p", callback_data="480"),
+    InlineKeyboardButton("720p", callback_data="720"),
+    InlineKeyboardButton("1080p", callback_data="1080"),
+    InlineKeyboardButton("🎵 Audio", callback_data="audio")
+]
 
-async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text.strip()
-    keyboard = [[InlineKeyboardButton(res, callback_data=f"video|{res}|{url}") for res in RESOLUTIONS],
-                [InlineKeyboardButton("Audio Only", callback_data=f"audio|best|{url}")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_photo(photo="https://via.placeholder.com/320x180.png?text=Preparing+Download", caption="اختر الدقة أو صوت فقط", reply_markup=reply_markup)
+markup = InlineKeyboardMarkup(row_width=3)
+markup.add(*QUALITY_BUTTONS)
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    type_, res, url = data.split("|")
-    
-    await query.edit_message_caption(caption="⏳ جاري التحميل ...")
-    
-    ydl_opts = {"outtmpl": "%(title)s.%(ext)s", "format": "best"}
-    
-    if type_ == "video":
-        # اختر الدقة إذا موجودة
-        ydl_opts["format"] = f"bestvideo[height<={res.replace('p','')}]+bestaudio/best"
-    elif type_ == "audio":
-        ydl_opts["format"] = "bestaudio/best"
-        ydl_opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
-    
+# ===== أوامر البوت =====
+@dp.message_handler(commands=['start'])
+async def start(message: types.Message):
+    await message.reply("هلا بيك! 🚀\nدز رابط YouTube، TikTok أو Instagram لتنزيله.")
+
+@dp.message_handler()
+async def download_link(message: types.Message):
+    url = message.text.strip()
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        await message.reply("جارٍ تجهيز روابط التحميل... ⏳", reply=False)
+        # استخراج معلومات الفيديو
+        with YoutubeDL({'quiet': True}) as ydl:
             info = ydl.extract_info(url, download=False)
-            title = info.get("title", "video")
-            duration_sec = info.get("duration", 0)
-            minutes, seconds = divmod(duration_sec, 60)
-            duration = f"{minutes}:{seconds:02d}"
-            thumbnail_url = info.get("thumbnail")
-            
-            # تحميل الملف في الذاكرة
-            buffer = BytesIO()
-            ydl_opts_mem = ydl_opts.copy()
-            ydl_opts_mem["outtmpl"] = "-"
-            ydl_opts_mem["nopart"] = True
-            ydl_opts_mem["progress_hooks"] = [lambda d: None]
-            # تنزيل فعلي على القرص أولاً
-            ydl.download([url])
-            # أخذ اسم الملف الأخير
-            file_name = ydl.prepare_filename(info)
-            
-            # إرسال الملف
-            if type_ == "audio":
-                with open(file_name, "rb") as f:
-                    await query.message.reply_audio(audio=f, caption=f"✅ Download completed by XAS\nDuration: {duration}")
-            else:
-                with open(file_name, "rb") as f:
-                    await query.message.reply_video(video=f, caption=f"✅ Download completed by XAS\nDuration: {duration}", supports_streaming=True)
+            title = info.get('title', 'video')
+            duration = str(timedelta(seconds=info.get('duration', 0)))
+            thumbnail = info.get('thumbnail', None)
+
+        # حفظ بيانات المستخدم بالفيديو
+        await message.reply_photo(photo=thumbnail,
+                                  caption=f"اختر الدقة لتحميل: {title}\nمدة الفيديو: {duration}",
+                                  reply_markup=markup)
+
+        # حفظ المعلومات مؤقتًا بالذاكرة
+        dp.current_state(user=message.from_user.id).update_data(url=url, title=title)
+
     except Exception as e:
-        await query.message.reply_text(f"❌ فشل التحميل: {e}")
+        await message.reply(f"حدث خطأ أثناء معالجة الرابط: {str(e)}")
 
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+# ===== التعامل مع أزرار الدقة =====
+@dp.callback_query_handler()
+async def callback_download(call: types.CallbackQuery):
+    await call.answer("جارٍ التحميل... ⏳")
+    data = await dp.current_state(user=call.from_user.id).get_data()
+    url = data.get('url')
+    title = data.get('title', 'video')
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
-app.add_handler(CallbackQueryHandler(button))
+    choice = call.data
+    os.makedirs("downloads", exist_ok=True)
 
+    try:
+        if choice == "audio":
+            opts = ydl_opts_audio
+        else:
+            opts = ydl_opts_video
+            opts['format'] = f"bestvideo[height<={choice}]+bestaudio/best"
+
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+
+        # إرسال الملف
+        if choice == "audio":
+            await bot.send_audio(call.from_user.id, open(filename, 'rb'),
+                                 caption=f"Download completed by XAS .. مدة الفيديو: {str(timedelta(seconds=info.get('duration',0)))}")
+        else:
+            await bot.send_video(call.from_user.id, open(filename, 'rb'),
+                                 caption=f"Download completed by XAS .. مدة الفيديو: {str(timedelta(seconds=info.get('duration',0)))}")
+
+        os.remove(filename)  # حذف الملف بعد الإرسال
+    except Exception as e:
+        await bot.send_message(call.from_user.id, f"حدث خطأ أثناء التحميل: {str(e)}")
+
+# ===== تشغيل البوت Polling =====
 if __name__ == "__main__":
-    app.run_polling(poll_interval=5)
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    from aiogram import executor
+    executor.start_polling(dp, skip_updates=True)
