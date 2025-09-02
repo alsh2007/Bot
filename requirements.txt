@@ -1,2 +1,2 @@
 pyTelegramBotAPI==4.13.0
-yt-dlp==2025.8.1
+yt-dlp
