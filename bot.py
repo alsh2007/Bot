@@ -3,7 +3,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import yt_dlp
 import io
 
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+TOKEN = "7036178118:AAGCGkRbYdCclSaTVGzPJpUI3s_yuhSQpbc"
 bot = telebot.TeleBot(TOKEN)
 
 # الكوكيز
