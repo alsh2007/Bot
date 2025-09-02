@@ -1,58 +1,96 @@
 import os
 import yt_dlp
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+import tempfile
+from flask import Flask, request
+from threading import Thread
+from telegram import Update, Bot
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# ----------------- المتغيرات -----------------
+TOKEN = os.getenv("TOKEN")  # توكن البوت
+PORT = int(os.getenv("PORT", 5000))  # بورت Railway
+APP_URL = os.getenv("APP_URL")  # رابط مشروع Railway، مثال: https://mybot.up.railway.app
 
-# /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("هلا 🙌 دزلي رابط يوتيوب وأنزلك الصوت 🎶")
+# ----------------- Flask -----------------
+app_flask = Flask("")
 
-# تحميل الصوت
-async def download_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    print(f"📩 استلمت: {text}")   # Debug
+@app_flask.route("/", methods=["GET"])
+def home():
+    return "Bot is running!"
 
-    if not text.startswith("http"):
-        await update.message.reply_text("⚠️ دزلي رابط صحيح 🙏")
-        return
+@app_flask.route(f"/{TOKEN}", methods=["POST"])
+def telegram_webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    app_bot.update_queue.put(update)
+    return "OK"
 
-    await update.message.reply_text("⏳ دا ينزل الصوت...")
+def run_flask():
+    app_flask.run(host="0.0.0.0", port=PORT)
+
+Thread(target=run_flask).start()
+
+# ----------------- دالة تحميل الصوت -----------------
+def download_audio(url):
+    temp_dir = tempfile.mkdtemp()
+    out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
 
     ydl_opts = {
         "format": "bestaudio/best",
-        "outtmpl": "%(id)s.%(ext)s",
-        "noplaylist": True,
+        "outtmpl": out_file,
+        "noplaylist": False,
         "quiet": True,
     }
 
+    files = []
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        if "entries" in info:  # Playlist
+            for entry in info["entries"]:
+                filename = ydl.prepare_filename(entry)
+                base, ext = os.path.splitext(filename)
+                audio_file = base + ".webm"
+                files.append(audio_file)
+        else:  # فيديو واحد
+            filename = ydl.prepare_filename(info)
+            base, ext = os.path.splitext(filename)
+            audio_file = base + ".webm"
+            files.append(audio_file)
+
+    return files
+
+# ----------------- أوامر البوت -----------------
+async def start(update: Update, context: CallbackContext):
+    await update.message.reply_text("Welcome! Send me a YouTube video or playlist link to get audio files.")
+
+async def handle_message(update: Update, context: CallbackContext):
+    url = update.message.text
+    if "youtube.com" not in url and "youtu.be" not in url:
+        await update.message.reply_text("❌ Please send a valid YouTube link.")
+        return
+
+    await update.message.reply_text("⏳ Downloading, please wait...")
+
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(text, download=True)
-            file_name = f"{info['id']}.{info['ext']}"
-
-            with open(file_name, "rb") as audio:
-                await update.message.reply_audio(
-                    audio=audio,
-                    title=info.get("title", "Audio"),
-                    performer=info.get("uploader", "")
-                )
-
-            os.remove(file_name)
-
+        files = download_audio(url)
+        for f in files:
+            with open(f, "rb") as audio:
+                await update.message.reply_audio(audio, caption="✅ Download completed by Xas")
     except Exception as e:
-        print(f"❌ Error: {e}")  # Debug
-        await update.message.reply_text(f"⚠️ صار خطأ: {str(e)}")
+        await update.message.reply_text(f"⚠️ Error: {e}")
 
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+# ----------------- تشغيل البوت -----------------
+bot = Bot(TOKEN)
+app_bot = Application.builder().token(TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    # نخلي أي رسالة نصية تمر
-    app.add_handler(MessageHandler(filters.TEXT, download_audio))
+app_bot.add_handler(CommandHandler("start", start))
+app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    app.run_polling()
+# ضبط Webhook
+bot.set_webhook(f"{APP_URL}/{TOKEN}")
 
-if __name__ == "__main__":
-    main()
+print("🚀 Bot is running on Railway...")
+app_bot.run_webhook(
+    listen="0.0.0.0",
+    port=PORT,
+    webhook_path=f"/{TOKEN}",
+)
