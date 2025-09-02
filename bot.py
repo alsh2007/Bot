@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-PORT = int(os.getenv("PORT", 5000))  # البورت للـ Replit
+PORT = int(os.getenv("PORT", 5000))
 
 # ----------------- Flask لحفظ البوت شغال -----------------
 app_flask = Flask("")
@@ -28,11 +28,14 @@ def download_audio(url):
     out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
 
     ydl_opts = {  
-        "format": "bestaudio/best",  
-        "outtmpl": out_file,  
-        "noplaylist": False,  
-        "quiet": True,  
-    }  
+        "format": "bestaudio/best",
+        "outtmpl": out_file,
+        "noplaylist": False,
+        "quiet": True,
+        "nocheckcertificate": True,
+        "geo_bypass": True,
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    }
 
     files = []  
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:  
