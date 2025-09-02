@@ -126,7 +126,7 @@ def main():
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app_bot.add_handler(CallbackQueryHandler(button))
 
-    print("🚀 Bot is running...")
+    print(" Bot is running...")
     app_bot.run_polling()
 
 if __name__ == "__main__":
