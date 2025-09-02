@@ -1,72 +1,48 @@
 import os
-os.system("pip install telegram")
-import telegram
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-from yt_dlp import YoutubeDL
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import yt_dlp
 
+# المتغيرات من Railway
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-COOKIES = os.environ.get("COOKIES")  # خليها None إذا ما عندك
+COOKIES = os.environ.get("COOKIES")  # الكوكيز كلها بسطر واحد
 
-# تخزين روابط مؤقتة
-user_links = {}
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("هلا! ابعثلي رابط يوتيوب وراح ارسلك الصوت.")
 
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "هلا! ارسل رابط يوتيوب لتحميله."
-    )
-
-def handle_message(update: Update, context: CallbackContext):
+async def download_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
-    user_id = update.message.from_user.id
-    user_links[user_id] = url
-
-    keyboard = [["🎵 صوت", "🎥 فيديو"]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-    update.message.reply_text("اختر ما تريد تحميله:", reply_markup=reply_markup)
-
-def download_media(url, choice):
+    await update.message.reply_text("جاري تحميل الصوت... 🎵")
+    
     ydl_opts = {
-        "cookiefile": None if not COOKIES else COOKIES,
-        "outtmpl": "%(title)s.%(ext)s"
+        'format': 'bestaudio/best',
+        'cookiefile': None,
+        'cookies': COOKIES,
+        'outtmpl': 'audio.%(ext)s',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'quiet': True,
+        'no_warnings': True,
     }
 
-    if choice == "audio":
-        ydl_opts["format"] = "bestaudio/best"
-    else:
-        ydl_opts["format"] = "bestvideo+bestaudio/best"
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
-    with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        return ydl.prepare_filename(info)
-
-def handle_choice(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    text = update.message.text
-
-    if user_id not in user_links:
-        update.message.reply_text("أرسل الرابط أولاً.")
-        return
-
-    url = user_links[user_id]
-    update.message.reply_text("جارٍ التحميل، انتظر شوي...")
-
-    choice = "audio" if "صوت" in text else "video"
-    file_path = download_media(url, choice)
-
-    update.message.reply_document(open(file_path, "rb"))
-    del user_links[user_id]
-
-def main():
-    updater = Updater(BOT_TOKEN)
-    dp = updater.dispatcher
-
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-    dp.add_handler(MessageHandler(Filters.regex("^(🎵 صوت|🎥 فيديو)$"), handle_choice))
-
-    updater.start_polling()
-    updater.idle()
+        await update.message.reply_audio(audio=open("audio.mp3", 'rb'))
+    except Exception as e:
+        await update.message.reply_text(f"صار خطأ: {e}")
+    finally:
+        if os.path.exists("audio.mp3"):
+            os.remove("audio.mp3")
 
 if __name__ == "__main__":
-    main()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_audio))
+    
+    app.run_polling()
