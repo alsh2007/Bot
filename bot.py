@@ -3,126 +3,85 @@ import yt_dlp
 import tempfile
 from flask import Flask
 from threading import Thread
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
 TOKEN = os.getenv("TOKEN")
-APP_URL = os.getenv("APP_URL")  # الرابط الرسمي للبوت على Railway
-PORT = int(os.getenv("PORT", 5000))
+PORT = int(os.getenv("PORT", 5000))  # البورت للـ Replit
 
-# ----------------- Flask لحفظ البوت شغال -----------------
+----------------- Flask لحفظ البوت شغال -----------------
+
 app_flask = Flask("")
 
 @app_flask.route("/")
 def home():
-    return "Bot is running!"
+return "Bot is running!"
 
 def run_flask():
-    app_flask.run(host="0.0.0.0", port=PORT)
+app_flask.run(host="0.0.0.0", port=PORT)
 
 Thread(target=run_flask).start()
-# ----------------------------------------------------------
 
-# ----------------- دوال تنزيل الفيديو -----------------
+----------------------------------------------------------
+
+دالة تحويل الفيديو إلى صوت
+
 def download_audio(url):
-    temp_dir = tempfile.mkdtemp()
-    out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
+temp_dir = tempfile.mkdtemp()
+out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
 
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": out_file,
-        "quiet": True,
-    }
+ydl_opts = {  
+    "format": "bestaudio/best",  
+    "outtmpl": out_file,  
+    "noplaylist": False,  
+    "quiet": True,  
+}  
 
-    files = []
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        if "entries" in info:
-            for entry in info["entries"]:
-                filename = ydl.prepare_filename(entry)
-                base, ext = os.path.splitext(filename)
-                files.append(base + ".webm")
-        else:
-            filename = ydl.prepare_filename(info)
-            base, ext = os.path.splitext(filename)
-            files.append(base + ".webm")
-    return files
+files = []  
+with yt_dlp.YoutubeDL(ydl_opts) as ydl:  
+    info = ydl.extract_info(url, download=True)  
+    if "entries" in info:  # Playlist  
+        for entry in info["entries"]:  
+            filename = ydl.prepare_filename(entry)  
+            base, ext = os.path.splitext(filename)  
+            audio_file = base + ".webm"  
+            files.append(audio_file)  
+    else:  # Single video  
+        filename = ydl.prepare_filename(info)  
+        base, ext = os.path.splitext(filename)  
+        audio_file = base + ".webm"  
+        files.append(audio_file)  
 
-def get_video_formats(url):
-    with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
-        info = ydl.extract_info(url, download=False)
-        formats = info.get("formats", [])
-        result = []
-        for f in formats:
-            if f.get("filesize") is not None:
-                size_mb = round(f["filesize"]/1024/1024, 2)
-            else:
-                size_mb = 0
-            result.append({
-                "format_id": f["format_id"],
-                "resolution": f.get("format_note") or f.get("resolution") or "Unknown",
-                "ext": f["ext"],
-                "size": size_mb
-            })
-        return result
+return files
 
-# ----------------- Handlers -----------------
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Welcome! Send me a YouTube, Instagram, or TikTok link.")
+await update.message.reply_text("Welcome! Send me a YouTube video or playlist link to get audio files.")
 
 async def handle_message(update: Update, context: CallbackContext):
-    url = update.message.text
-    if "youtube.com" in url or "youtu.be" in url:
-        formats = get_video_formats(url)
-        keyboard = []
-        for f in formats[:10]:  # نعرض أول 10 صيغ
-            button_text = f"{f['resolution']} ({f['ext']}) {f['size']}MB"
-            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"url|{f['format_id']}|{url}")])
-        # زر تحميل صوت
-        keyboard.append([InlineKeyboardButton("🔊 Download Audio", callback_data=f"audio|{url}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Select the format:", reply_markup=reply_markup)
-    elif "instagram.com" in url or "tiktok.com" in url:
-        await update.message.reply_text("⏳ Downloading, please wait...")
-        try:
-            files = download_audio(url)
-            for f in files:
-                with open(f, "rb") as video:
-                    await update.message.reply_video(video, caption="✅ Download completed by Xas")
-        except Exception as e:
-            await update.message.reply_text(f"⚠️ Error: {e}")
-    else:
-        await update.message.reply_text("❌ Please send a valid YouTube, Instagram, or TikTok link.")
+url = update.message.text
+if "youtube.com" not in url and "youtu.be" not in url:
+await update.message.reply_text("❌ Please send a valid YouTube link.")
+return
 
-async def button_callback(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-    data = query.data.split("|")
-    if data[0] == "url":
-        format_id, url = data[1], data[2]
-        await query.edit_message_text("⏳ Downloading selected video...")
-        ydl_opts = {"format": format_id}
-        files = download_audio(url)
-        for f in files:
-            with open(f, "rb") as video:
-                await query.message.reply_video(video, caption="✅ Download completed by Xas")
-    elif data[0] == "audio":
-        url = data[1]
-        await query.edit_message_text("⏳ Downloading audio...")
-        files = download_audio(url)
-        for f in files:
-            with open(f, "rb") as audio:
-                await query.message.reply_audio(audio, caption="✅ Download completed by Xas")
+await update.message.reply_text("⏳ Downloading, please wait...")  
 
-# ----------------- Main -----------------
+try:  
+    files = download_audio(url)  
+    for f in files:  
+        with open(f, "rb") as audio:  
+            await update.message.reply_audio(audio, caption="✅ Download completed by Xas")  
+except Exception as e:  
+    await update.message.reply_text(f"⚠️ Error: {e}")
+
 def main():
-    app_bot = Application.builder().token(TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app_bot.add_handler(CallbackQueryHandler(button_callback))
+app_bot = Application.builder().token(TOKEN).build()
 
-    print("🚀 Bot is running...")
-    app_bot.run_polling()
+app_bot.add_handler(CommandHandler("start", start))  
+app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))  
 
-if __name__ == "__main__":
-    main()
+print("🚀 Bot is running...")  
+app_bot.run_polling()
+
+if name == "main":
+main()
+
