@@ -9,7 +9,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 TOKEN = os.getenv("TOKEN")
 PORT = int(os.getenv("PORT", 5000))  # البورت للـ Replit
 
------------------ #Flask لحفظ البوت شغال -----------------
 
 app_flask = Flask("")
 
