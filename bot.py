@@ -1,127 +1,103 @@
 import os
-os.system("pip install requests")
 import yt_dlp
 import tempfile
-import requests
-from flask import Flask
-from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, CallbackContext
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, CallbackContext
 
 TOKEN = os.getenv("TOKEN")
-PORT = int(os.getenv("PORT", 5000))  # البورت للـ Replit أو Railway
 
-# ----------------- Flask لحفظ البوت شغال -----------------
-app_flask = Flask("")
-
-@app_flask.route("/")
-def home():
-    return "Bot is running!"
-
-def run_flask():
-    app_flask.run(host="0.0.0.0", port=PORT)
-
-Thread(target=run_flask).start()
-# ----------------------------------------------------------
-
-# دالة تحميل الفيديو أو الصوت من يوتيوب
+# دالة تحميل الفيديو أو الصوت
 def get_video_info(url):
-    ydl_opts = {"quiet": True, "noplaylist": True}
+    ydl_opts = {"quiet": True, "format": "bestvideo+bestaudio/best"}
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
     return info
 
-def download_file(url, path):
-    ydl_opts = {"outtmpl": path, "quiet": True}
+def download_video(url, resolution):
+    temp_dir = tempfile.mkdtemp()
+    out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
+    ydl_opts = {
+        "format": f"bestvideo[height<={resolution}]+bestaudio/best" if resolution != "audio" else "bestaudio/best",
+        "outtmpl": out_file,
+        "noplaylist": False,
+        "quiet": True,
+    }
+    files = []
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+        info = ydl.extract_info(url, download=True)
+        if "entries" in info:
+            for entry in info["entries"]:
+                filename = ydl.prepare_filename(entry)
+                if resolution == "audio":
+                    base, ext = os.path.splitext(filename)
+                    audio_file = base + ".webm"
+                    files.append(audio_file)
+                else:
+                    files.append(filename)
+        else:
+            filename = ydl.prepare_filename(info)
+            if resolution == "audio":
+                base, ext = os.path.splitext(filename)
+                audio_file = base + ".webm"
+                files.append(audio_file)
+            else:
+                files.append(filename)
+    return files
 
+# دالة /start
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text(
-        "Welcome! Send me a YouTube, TikTok, or Instagram link to download video or audio."
-    )
+    await update.message.reply_text("Welcome! Send me a YouTube video link to get started.")
 
-# ----------------- التعامل مع الرسائل -----------------
+# دالة استقبال الروابط
 async def handle_message(update: Update, context: CallbackContext):
     url = update.message.text
-    if not any(domain in url for domain in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com"]):
-        await update.message.reply_text("❌ Please send a valid YouTube, TikTok, or Instagram link.")
+    if "youtube.com" not in url and "youtu.be" not in url:
+        await update.message.reply_text("❌ Please send a valid YouTube link.")
         return
 
-    await update.message.reply_text("⏳ Processing your link...")
+    await update.message.reply_text("⏳ Fetching video info...")
+    info = get_video_info(url)
+    title = info.get("title", "Video")
+    thumbnail = info.get("thumbnail")
 
-    try:
-        info = get_video_info(url)
-        title = info.get("title", "Video")
-        thumbnail_url = info.get("thumbnail")
+    # إعداد الأزرار للدقات
+    keyboard = [
+        [InlineKeyboardButton("144p", callback_data=f"{url}|144")],
+        [InlineKeyboardButton("240p", callback_data=f"{url}|240")],
+        [InlineKeyboardButton("360p", callback_data=f"{url}|360")],
+        [InlineKeyboardButton("480p", callback_data=f"{url}|480")],
+        [InlineKeyboardButton("720p", callback_data=f"{url}|720")],
+        [InlineKeyboardButton("1080p", callback_data=f"{url}|1080")],
+        [InlineKeyboardButton("🎵 Audio Only", callback_data=f"{url}|audio")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_photo(photo=thumbnail, caption=f"Select download option for: {title}", reply_markup=reply_markup)
 
-        # أزرار الدقة + تحويل لصوت
-        buttons = []
-        if "formats" in info:
-            for f in info["formats"]:
-                if f.get("acodec") != "none" or f.get("vcodec") != "none":
-                    # ناخذ الدقات الشائعة فقط
-                    if f.get("height") in [144, 240, 360, 480, 720, 1080]:
-                        buttons.append([InlineKeyboardButton(f"{f['height']}p", callback_data=f"video|{f['format_id']}|{url}")])
-        # زر الصوت
-        buttons.append([InlineKeyboardButton("🎵 Audio", callback_data=f"audio|{url}")])
-        keyboard = InlineKeyboardMarkup(buttons)
-
-        if thumbnail_url:
-            await update.message.reply_photo(photo=thumbnail_url, caption="Select quality or audio:", reply_markup=keyboard)
-        else:
-            await update.message.reply_text("Select quality or audio:", reply_markup=keyboard)
-
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ Error: {e}")
-
-# ----------------- التعامل مع اختيار المستخدم -----------------
-async def button_handler(update: Update, context: CallbackContext):
+# دالة الضغط على الأزرار
+async def button(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
+    data = query.data
+    url, choice = data.split("|")
+    await query.edit_message_caption(caption=f"⏳ Downloading {choice}...")
 
-    data = query.data.split("|")
-    action = data[0]
+    try:
+        files = download_video(url, choice)
+        for f in files:
+            with open(f, "rb") as media:
+                if choice == "audio":
+                    await query.message.reply_audio(media, caption="✅ Download completed!")
+                else:
+                    await query.message.reply_video(media, caption="✅ Download completed!")
+    except Exception as e:
+        await query.message.reply_text(f"⚠️ Error: {e}")
 
-    temp_dir = tempfile.mkdtemp()
-
-    if action == "video":
-        format_id, url = data[1], data[2]
-        path = os.path.join(temp_dir, "%(title)s.%(ext)s")
-        ydl_opts = {"format": format_id, "outtmpl": path, "quiet": True}
-        await query.edit_message_text("⏳ Downloading video...")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
-        # تحقق من حجم الملف، لو أكبر من 50 ميغا أرسل رابط بدلاً من الملف
-        file_size = os.path.getsize(file_path)
-        if file_size > 50 * 1024 * 1024:
-            await query.edit_message_text(f"File too big! Download link: {url}")
-        else:
-            with open(file_path, "rb") as f:
-                await query.edit_message_text("✅ Sending video...")
-                await query.message.reply_video(f)
-
-    elif action == "audio":
-        url = data[1]
-        path = os.path.join(temp_dir, "%(title)s.%(ext)s")
-        ydl_opts = {"format": "bestaudio/best", "outtmpl": path, "quiet": True}
-        await query.edit_message_text("⏳ Downloading audio...")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
-            base, ext = os.path.splitext(file_path)
-            file_path = base + ".webm"
-        with open(file_path, "rb") as f:
-            await query.edit_message_text("✅ Sending audio...")
-            await query.message.reply_audio(f, caption="Downloaded by Xas")
-
-# ----------------- تشغيل البوت -----------------
+# إعداد التطبيق
 def main():
     app_bot = Application.builder().token(TOKEN).build()
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app_bot.add_handler(CallbackQueryHandler(button_handler))
+    app_bot.add_handler(CallbackQueryHandler(button))
 
     print("🚀 Bot is running...")
     app_bot.run_polling()
