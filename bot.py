@@ -1,106 +1,92 @@
-import os
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 import yt_dlp
 import tempfile
-from flask import Flask
-from threading import Thread
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, CallbackContext
+import os
+import imageio_ffmpeg as ffmpeg  # للتأكد من وجود ffmpeg داخلي
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-PORT = int(os.getenv("PORT", 5000))
-
-# ----------------- Flask لحفظ البوت شغال -----------------
-app_flask = Flask("")
-
-@app_flask.route("/")
-def home():
-    return "Bot is running!"
-
-def run_flask():
-    app_flask.run(host="0.0.0.0", port=PORT)
-
-Thread(target=run_flask).start()
-# ----------------------------------------------------------
-
-# دالة تنزيل الفيديو أو الصوت
-def download_media(url, mode="audio"):
-    temp_dir = tempfile.mkdtemp()
-    out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
-
-    ydl_opts = {  
-        "outtmpl": out_file,
-        "quiet": True,
-        "nocheckcertificate": True,
-        "geo_bypass": True,
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-    }
-
-    # تحديد الصيغة حسب الاختيار
-    if mode == "audio":
-        ydl_opts["format"] = "bestaudio/best"
-    else:  # video
-        ydl_opts["format"] = "bestvideo+bestaudio/best"
-    
-    files = []
+# دالة لاختيار رابط وتحليل نوعه
+def get_video_info(url):
+    ydl_opts = {'quiet': True}
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        if "entries" in info:
-            for entry in info["entries"]:
-                filename = ydl.prepare_filename(entry)
-                base, ext = os.path.splitext(filename)
-                files.append(base + (".mp3" if mode=="audio" else ".mp4"))
-        else:
-            filename = ydl.prepare_filename(info)
-            base, ext = os.path.splitext(filename)
-            files.append(base + (".mp3" if mode=="audio" else ".mp4"))
-    return files
+        info = ydl.extract_info(url, download=False)
+    return info
 
-async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Welcome! Send me a YouTube, Instagram, or TikTok link to download audio or video.")
+# دالة تنزيل الصوت
+def download_audio(url):
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': temp_file.name,
+        'quiet': True,
+        'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec':'mp3','preferredquality':'192'}]
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+    return temp_file.name
 
-# معالجة الزر
-async def button_handler(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-    url = query.data.split("|")[1]
-    mode = query.data.split("|")[0]
+# دالة تنزيل الفيديو
+def download_video(url):
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    ydl_opts = {
+        'format': 'bestvideo+bestaudio/best',
+        'outtmpl': temp_file.name,
+        'quiet': True
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+    return temp_file.name
 
-    await query.message.edit_text(f"⏳ Downloading {mode}, please wait...")
-
-    try:
-        files = download_media(url, mode)
-        for f in files:
-            with open(f, "rb") as media:
-                if mode == "audio":
-                    await query.message.reply_audio(media, caption=f"✅ {mode.capitalize()} download completed!")
-                else:
-                    await query.message.reply_video(media, caption=f"✅ {mode.capitalize()} download completed!")
-    except Exception as e:
-        await query.message.reply_text(f"⚠️ Error: {e}")
-
-async def handle_message(update: Update, context: CallbackContext):
-    url = update.message.text
-    # إذا الرسالة مو رابط معروف، ما يسوي شي
-    if not any(x in url for x in ["youtube.com", "youtu.be", "instagram.com", "tiktok.com"]):
+# استقبال الرسائل
+def handle_message(update: Update, context: CallbackContext):
+    url = update.message.text.strip()
+    # اذا الرسالة مو رابط، ما نسوي شي
+    if not url.startswith(('http://','https://')):
         return
-
-    # زرّين للاختيار بين audio و video
+    
+    # نرسل زرين: Audio و Video
     keyboard = [
-        [InlineKeyboardButton("Audio 🎵", callback_data=f"audio|{url}"),
-         InlineKeyboardButton("Video 🎬", callback_data=f"video|{url}")]
+        [InlineKeyboardButton("Audio", callback_data=f"audio|{url}"),
+         InlineKeyboardButton("Video", callback_data=f"video|{url}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Choose format:", reply_markup=reply_markup)
+    update.message.reply_text("اختر ما تريد تنزيله:", reply_markup=reply_markup)
 
-def main():
-    app_bot = Application.builder().token(BOT_TOKEN).build()
+# التعامل ويا الزر
+def button_handler(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    data = query.data.split("|")
+    action, url = data[0], data[1]
 
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app_bot.add_handler(CallbackQueryHandler(button_handler))
+    msg = query.message.reply_text("جاري التحميل... ⏳")
 
-    print("🚀 Bot is running...")
-    app_bot.run_polling()
+    try:
+        if action == "audio":
+            file_path = download_audio(url)
+            query.message.reply_audio(audio=open(file_path, 'rb'))
+        elif action == "video":
+            file_path = download_video(url)
+            query.message.reply_video(video=open(file_path, 'rb'))
+    except Exception as e:
+        query.message.reply_text(f"حدث خطأ: {e}")
+    finally:
+        if 'file_path' in locals() and os.path.exists(file_path):
+            os.remove(file_path)
+        msg.delete()
 
-if __name__ == "__main__":
-    main()
+# البداية
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text("هلو! أرسل رابط يوتيوب/إنستا/تيك توك لتنزيله.")
+
+if __name__ == '__main__':
+    TOKEN = "YOUR_BOT_TOKEN_HERE"
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
+
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    dp.add_handler(CallbackQueryHandler(button_handler))
+
+    updater.start_polling()
+    updater.idle()
