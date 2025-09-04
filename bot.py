@@ -1,4 +1,4 @@
-import os
+teimport os
 import yt_dlp
 import tempfile
 from flask import Flask
@@ -22,7 +22,7 @@ def run_flask():
 Thread(target=run_flask).start()
 # ----------------------------------------------------------
 
-# دالة تحويل الفيديو إلى صوت
+# دالة تنزيل الصوت
 def download_audio(url):
     temp_dir = tempfile.mkdtemp()
     out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
@@ -41,13 +41,13 @@ def download_audio(url):
     files = []  
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:  
         info = ydl.extract_info(url, download=True)  
-        if "entries" in info:  # Playlist  
+        if "entries" in info:  
             for entry in info["entries"]:  
                 filename = ydl.prepare_filename(entry)  
                 base, ext = os.path.splitext(filename)  
                 audio_file = base + ".webm"  
                 files.append(audio_file)  
-        else:  # Single video  
+        else:  
             filename = ydl.prepare_filename(info)  
             base, ext = os.path.splitext(filename)  
             audio_file = base + ".webm"  
@@ -55,13 +55,13 @@ def download_audio(url):
 
     return files
 
-# دالة تنزيل الفيديو
+# دالة تنزيل الفيديو بصيغة MP4
 def download_video(url):
     temp_dir = tempfile.mkdtemp()
     out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
 
     ydl_opts = {  
-        "format": "best",
+        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",  # force mp4
         "outtmpl": out_file,
         "noplaylist": False,
         "quiet": True,
@@ -77,23 +77,26 @@ def download_video(url):
         if "entries" in info:  
             for entry in info["entries"]:  
                 filename = ydl.prepare_filename(entry)  
-                files.append(filename)  
+                base, ext = os.path.splitext(filename)  
+                mp4_file = base + ".mp4"  
+                files.append(mp4_file)  
         else:  
             filename = ydl.prepare_filename(info)  
-            files.append(filename)  
+            base, ext = os.path.splitext(filename)  
+            mp4_file = base + ".mp4"  
+            files.append(mp4_file)  
 
     return files
 
 # استقبال أمر /start
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Welcome! Send me a YouTube video or playlist link to get audio or video.")
+    await update.message.reply_text("Welcome! Send me a YouTube, Instagram, or TikTok link to get audio or video.")
 
 # استقبال أي رابط
 async def handle_message(update: Update, context: CallbackContext):
     url = update.message.text
-    if "youtube.com" not in url and "youtu.be" not in url:
-        await update.message.reply_text("❌ Please send a valid YouTube link.")
-        return
+    if not any(site in url for site in ["youtube.com", "youtu.be", "instagram.com", "tiktok.com"]):
+        return  # لا يعمل شيء إذا ماكو رابط صحيح
 
     # نحفظ الرابط بجلسة المستخدم
     context.user_data["url"] = url
@@ -113,7 +116,7 @@ async def button_handler(update: Update, context: CallbackContext):
 
     url = context.user_data.get("url")
     if not url:
-        await query.edit_message_text("⚠️ No URL found, please send a YouTube link again.")
+        await query.edit_message_text("⚠️ No URL found, please send a link again.")
         return
 
     choice = query.data
@@ -124,12 +127,12 @@ async def button_handler(update: Update, context: CallbackContext):
             files = download_audio(url)
             for f in files:
                 with open(f, "rb") as audio:
-                    await query.message.reply_audio(audio, caption="✅ Audio download completed by Xas")
+                    await query.message.reply_audio(audio, caption="✅ Audio download completed")
         elif choice == "video":
             files = download_video(url)
             for f in files:
                 with open(f, "rb") as video:
-                    await query.message.reply_video(video, caption="✅ Video download completed by Xas")
+                    await query.message.reply_video(video, caption="✅ Video download completed")
     except Exception as e:
         await query.message.reply_text(f"⚠️ Error: {e}")
 
