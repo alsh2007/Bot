@@ -34,7 +34,10 @@ def download_audio(url):
         "quiet": True,
         "nocheckcertificate": True,
         "geo_bypass": True,
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+
+        # 👇 هذا السطر خليته يقرأ الكوكيز من ملف
+        "cookiefile": "cookies.txt"
     }
 
     files = []  
