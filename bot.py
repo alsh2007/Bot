@@ -3,6 +3,7 @@ import yt_dlp
 import tempfile
 from flask import Flask
 from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 
@@ -17,10 +18,13 @@ def home():
     return "Bot is running!"
 
 def run_flask():
-    app_flask.run(host="0.0.0.0", port=PORT)
+    app_flask.run(host="0.0.0.0", port=PORT, threaded=True)  # multithreaded
 
 Thread(target=run_flask).start()
 # ----------------------------------------------------------
+
+# ThreadPoolExecutor للتوازي
+executor = ThreadPoolExecutor(max_workers=5)
 
 # دالة تنزيل الصوت
 def download_audio(url):
@@ -98,7 +102,6 @@ async def handle_message(update: Update, context: CallbackContext):
     if not any(site in url for site in ["youtube.com", "youtu.be", "instagram.com", "tiktok.com"]):
         return  # لا يعمل شيء إذا ماكو رابط صحيح
 
-    # نحفظ الرابط بجلسة المستخدم
     context.user_data["url"] = url
 
     keyboard = [
@@ -123,13 +126,14 @@ async def button_handler(update: Update, context: CallbackContext):
     await query.edit_message_text(f"⏳ Downloading {choice}... please wait.")
 
     try:
+        # تشغيل التنزيل في Thread منفصل
         if choice == "audio":
-            files = download_audio(url)
+            files = await context.application.run_in_executor(executor, download_audio, url)
             for f in files:
                 with open(f, "rb") as audio:
                     await query.message.reply_audio(audio, caption="✅ Audio download completed")
         elif choice == "video":
-            files = download_video(url)
+            files = await context.application.run_in_executor(executor, download_video, url)
             for f in files:
                 with open(f, "rb") as video:
                     await query.message.reply_video(video, caption="✅ Video download completed")
