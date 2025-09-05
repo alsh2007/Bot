@@ -1,11 +1,11 @@
 import os
 import yt_dlp
 import tempfile
+import asyncio
 from flask import Flask
 from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
-import asyncio
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 5000))
@@ -109,7 +109,7 @@ async def handle_message(update: Update, context: CallbackContext):
 
     await update.message.reply_text("Choose download type:", reply_markup=reply_markup)
 
-# معالجة الضغط على الأزرار مع دعم التوازي
+# معالجة الضغط على الأزرار
 async def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -123,7 +123,7 @@ async def button_handler(update: Update, context: CallbackContext):
     await query.edit_message_text(f"⏳ Downloading {choice}... please wait.")
 
     try:
-        # نستخدم asyncio.to_thread لتشغيل التنزيل بشكل منفصل لكل مستخدم
+        # ✅ نستخدم asyncio.to_thread لتشغيل الدوال blocking بشكل آمن
         if choice == "audio":
             files = await asyncio.to_thread(download_audio, url)
             for f in files:
@@ -140,11 +140,11 @@ async def button_handler(update: Update, context: CallbackContext):
 def main():
     app_bot = Application.builder().token(BOT_TOKEN).build()
 
-    app_bot.add_handler(CommandHandler("start", start))  
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))  
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app_bot.add_handler(CallbackQueryHandler(button_handler))
 
-    print("🚀 Bot is running...")  
+    print("🚀 Bot is running...")
     app_bot.run_polling()
 
 if __name__ == "__main__":
