@@ -3,9 +3,9 @@ import yt_dlp
 import tempfile
 from flask import Flask
 from threading import Thread
-from concurrent.futures import ThreadPoolExecutor
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+import asyncio
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 5000))
@@ -18,13 +18,10 @@ def home():
     return "Bot is running!"
 
 def run_flask():
-    app_flask.run(host="0.0.0.0", port=PORT, threaded=True)  # multithreaded
+    app_flask.run(host="0.0.0.0", port=PORT, threaded=True)
 
 Thread(target=run_flask).start()
 # ----------------------------------------------------------
-
-# ThreadPoolExecutor للتوازي
-executor = ThreadPoolExecutor(max_workers=5)
 
 # دالة تنزيل الصوت
 def download_audio(url):
@@ -65,7 +62,7 @@ def download_video(url):
     out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
 
     ydl_opts = {  
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",  # force mp4
+        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
         "outtmpl": out_file,
         "noplaylist": False,
         "quiet": True,
@@ -100,7 +97,7 @@ async def start(update: Update, context: CallbackContext):
 async def handle_message(update: Update, context: CallbackContext):
     url = update.message.text
     if not any(site in url for site in ["youtube.com", "youtu.be", "instagram.com", "tiktok.com"]):
-        return  # لا يعمل شيء إذا ماكو رابط صحيح
+        return
 
     context.user_data["url"] = url
 
@@ -112,7 +109,7 @@ async def handle_message(update: Update, context: CallbackContext):
 
     await update.message.reply_text("Choose download type:", reply_markup=reply_markup)
 
-# معالجة الضغط على الأزرار
+# معالجة الضغط على الأزرار مع دعم التوازي
 async def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -126,14 +123,14 @@ async def button_handler(update: Update, context: CallbackContext):
     await query.edit_message_text(f"⏳ Downloading {choice}... please wait.")
 
     try:
-        # تشغيل التنزيل في Thread منفصل
+        # نستخدم asyncio.to_thread لتشغيل التنزيل بشكل منفصل لكل مستخدم
         if choice == "audio":
-            files = await context.application.run_in_executor(executor, download_audio, url)
+            files = await asyncio.to_thread(download_audio, url)
             for f in files:
                 with open(f, "rb") as audio:
                     await query.message.reply_audio(audio, caption="✅ Audio download completed")
         elif choice == "video":
-            files = await context.application.run_in_executor(executor, download_video, url)
+            files = await asyncio.to_thread(download_video, url)
             for f in files:
                 with open(f, "rb") as video:
                     await query.message.reply_video(video, caption="✅ Video download completed")
