@@ -23,7 +23,7 @@ def run_flask():
 Thread(target=run_flask).start()
 # ----------------------------------------------------------
 
-# دالة تنزيل الصوت
+# دالة تنزيل الصوت (webm)
 def download_audio(url):
     temp_dir = tempfile.mkdtemp()
     out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
@@ -56,13 +56,13 @@ def download_audio(url):
 
     return files
 
-# دالة تنزيل الفيديو بصيغة MP4
+# دالة تنزيل الفيديو بصيغته الاصلية (غالباً webm)
 def download_video(url):
     temp_dir = tempfile.mkdtemp()
     out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
 
     ydl_opts = {  
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
+        "format": "bestvideo+bestaudio/best",  # ياخذ افضل فيديو وصوت
         "outtmpl": out_file,
         "noplaylist": False,
         "quiet": True,
@@ -78,14 +78,10 @@ def download_video(url):
         if "entries" in info:  
             for entry in info["entries"]:  
                 filename = ydl.prepare_filename(entry)  
-                base, ext = os.path.splitext(filename)  
-                mp4_file = base + ".mp4"  
-                files.append(mp4_file)  
+                files.append(filename)  
         else:  
             filename = ydl.prepare_filename(info)  
-            base, ext = os.path.splitext(filename)  
-            mp4_file = base + ".mp4"  
-            files.append(mp4_file)  
+            files.append(filename)  
 
     return files
 
@@ -123,7 +119,6 @@ async def button_handler(update: Update, context: CallbackContext):
     await query.edit_message_text(f"⏳ Downloading {choice}... please wait.")
 
     try:
-        # ✅ نستخدم asyncio.to_thread لتشغيل الدوال blocking بشكل آمن
         if choice == "audio":
             files = await asyncio.to_thread(download_audio, url)
             for f in files:
