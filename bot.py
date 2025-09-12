@@ -56,13 +56,13 @@ def download_audio(url):
 
     return files
 
-# دالة تنزيل الفيديو بصيغته الاصلية (غالباً webm)
+# دالة تنزيل الفيديو بدون دمج (webm/mp4 حسب المصدر)
 def download_video(url):
     temp_dir = tempfile.mkdtemp()
     out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
 
     ydl_opts = {  
-        "format": "bestvideo+bestaudio/best",  # ياخذ افضل فيديو وصوت
+        "format": "best",  # أفضل صيغة متوفرة بدون دمج
         "outtmpl": out_file,
         "noplaylist": False,
         "quiet": True,
