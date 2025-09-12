@@ -1,6 +1,5 @@
 import os
 import yt_dlp
-import tempfile
 import asyncio
 from flask import Flask
 from threading import Thread
@@ -23,12 +22,18 @@ def run_flask():
 Thread(target=run_flask).start()
 # ----------------------------------------------------------
 
-# دالة تنزيل الصوت (webm)
-def download_audio(url):
-    temp_dir = tempfile.mkdtemp()
-    out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
+# مجلد ثابت للتحميلات
+DOWNLOAD_DIR = os.path.join(os.getcwd(), "downloads")
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-    ydl_opts = {  
+# مسار ملف الكوكيز
+COOKIES_FILE = os.path.join(os.getcwd(), "cookies.txt")  # نفس مجلد main.py
+
+# دالة تنزيل الصوت
+def download_audio(url):
+    out_file = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
+
+    ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": out_file,
         "noplaylist": False,
@@ -36,32 +41,27 @@ def download_audio(url):
         "nocheckcertificate": True,
         "geo_bypass": True,
         "user_agent": "Mozilla/5.0",
-        "cookiefile": "cookies.txt"
+        "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None
     }
 
-    files = []  
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:  
-        info = ydl.extract_info(url, download=True)  
-        if "entries" in info:  
-            for entry in info["entries"]:  
-                filename = ydl.prepare_filename(entry)  
-                base, ext = os.path.splitext(filename)  
-                audio_file = base + ".webm"  
-                files.append(audio_file)  
-        else:  
-            filename = ydl.prepare_filename(info)  
-            base, ext = os.path.splitext(filename)  
-            audio_file = base + ".webm"  
-            files.append(audio_file)  
+    files = []
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        if "entries" in info:
+            for entry in info["entries"]:
+                filename = ydl.prepare_filename(entry)
+                files.append(filename)
+        else:
+            filename = ydl.prepare_filename(info)
+            files.append(filename)
 
     return files
 
-# دالة تنزيل الفيديو بدون دمج (webm/mp4 حسب المصدر)
+# دالة تنزيل الفيديو
 def download_video(url):
-    temp_dir = tempfile.mkdtemp()
-    out_file = os.path.join(temp_dir, "%(title)s.%(ext)s")
+    out_file = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
 
-    ydl_opts = {  
+    ydl_opts = {
         "format": "best",  # أفضل صيغة متوفرة بدون دمج
         "outtmpl": out_file,
         "noplaylist": False,
@@ -69,25 +69,27 @@ def download_video(url):
         "nocheckcertificate": True,
         "geo_bypass": True,
         "user_agent": "Mozilla/5.0",
-        "cookiefile": "cookies.txt"
+        "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None
     }
 
-    files = []  
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:  
-        info = ydl.extract_info(url, download=True)  
-        if "entries" in info:  
-            for entry in info["entries"]:  
-                filename = ydl.prepare_filename(entry)  
-                files.append(filename)  
-        else:  
-            filename = ydl.prepare_filename(info)  
-            files.append(filename)  
+    files = []
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        if "entries" in info:
+            for entry in info["entries"]:
+                filename = ydl.prepare_filename(entry)
+                files.append(filename)
+        else:
+            filename = ydl.prepare_filename(info)
+            files.append(filename)
 
     return files
 
 # استقبال أمر /start
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Welcome! Send me a YouTube, Instagram, or TikTok link to get audio or video.")
+    await update.message.reply_text(
+        "Welcome! Send me a YouTube, Instagram, or TikTok link to get audio or video."
+    )
 
 # استقبال أي رابط
 async def handle_message(update: Update, context: CallbackContext):
